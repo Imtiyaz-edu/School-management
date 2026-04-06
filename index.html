@@ -92,7 +92,7 @@ tbody td{padding:12px 14px;border-bottom:1px solid var(--border);font-size:13.5p
       <p>Firebase + GitHub Pages</p>
     </div>
     <div id="loginErr" class="alert a-danger" style="display:none"></div>
-    <div class="fg"><label>Email</label><input type="email" id="lEmail" placeholder="businesswithimtiyaz786@gmail.com" autocomplete="email"></div>
+    <div class="fg"><label>Email</label><input type="email" id="lEmail" placeholder="director@school.com" autocomplete="email"></div>
     <div class="fg"><label>Password</label><input type="password" id="lPass" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"></div>
     <button class="btn btn-primary btn-full" onclick="doLogin()" id="loginBtn">🔐 Login</button>
   </div>
@@ -146,10 +146,6 @@ import { getFirestore, collection, doc, setDoc, getDoc, getDocs, deleteDoc, quer
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, updatePassword, createUserWithEmailAndPassword }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
-// ================================================================
-//  🔴  APNI FIREBASE CONFIG YAHAN PASTE KAREIN
-//  firebase.google.com > Project Settings > Web App > firebaseConfig
-// ================================================================
 const firebaseConfig = {
   apiKey:            "// Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
