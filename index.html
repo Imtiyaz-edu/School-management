@@ -4,18 +4,20 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>School Management System</title>
+<link rel="dns-prefetch" href="https://www.gstatic.com">
+<link rel="dns-prefetch" href="https://firestore.googleapis.com">
+<link rel="dns-prefetch" href="https://identitytoolkit.googleapis.com">
+<link rel="preconnect" href="https://www.gstatic.com" crossorigin>
 <meta name="theme-color" content="#1a237e">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="School App">
 <link rel="manifest" href="manifest.json">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;600;700;800;900&family=Noto+Sans+Devanagari:wght@400;600;700&display=swap" rel="stylesheet">
-<!-- SheetJS for Excel reading -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<!-- Fonts removed for speed -->
+<!-- SheetJS loaded lazily when Bulk Upload is opened -->
 <style>
 :root{--primary:#1a237e;--primary-l:#3949ab;--primary-d:#0d1642;--accent:#f9a825;--danger:#c62828;--success:#2e7d32;--warn:#e65100;--bg:#eef0f5;--text:#1a1a2e;--muted:#6b7280;--border:#e5e7eb;--sw:260px}
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Noto Sans','Noto Sans Devanagari',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,'Noto Sans Devanagari',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
 /* LOGIN */
 .login-wrap{min-height:100vh;background:linear-gradient(135deg,var(--primary-d),var(--primary) 55%,var(--primary-l));display:flex;align-items:center;justify-content:center;padding:20px}
 .login-card{background:#fff;border-radius:20px;padding:44px 40px;width:100%;max-width:420px;box-shadow:0 30px 70px rgba(0,0,0,.35)}
@@ -240,9 +242,9 @@ tbody tr:hover{background:#f6f8ff}
   </div>
 </div>
 
-<script type="module">
+<script type="module" defer>
 import{initializeApp}from"https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import{getFirestore,collection,doc,setDoc,getDoc,getDocs,deleteDoc,query,where,serverTimestamp,orderBy}
+import{getFirestore,collection,doc,setDoc,getDoc,getDocs,deleteDoc,query,where,serverTimestamp}
   from"https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import{getAuth,signInWithEmailAndPassword,signOut,onAuthStateChanged,updatePassword,createUserWithEmailAndPassword}
   from"https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
@@ -276,6 +278,22 @@ async function getAll(c,...cons){
 async function getOne(c,id){const s=await getDoc(ref_(c,id));return s.exists()?{id:s.id,...s.data()}:null;}
 async function save_(c,id,data){await setDoc(ref_(c,id),{...data,updatedAt:serverTimestamp()},{merge:true});}
 async function del_(c,id){await deleteDoc(ref_(c,id));}
+// ── IN-MEMORY CACHE for fast repeated page loads ──
+const _cache={};
+const _cacheTime={};
+const CACHE_TTL=30000; // 30 seconds
+async function getAllCached(c,...cons){
+  if(!cons.length){
+    const now=Date.now();
+    if(_cache[c]&&(now-(_cacheTime[c]||0))<CACHE_TTL)return _cache[c];
+    const res=await getAll(c,...cons);
+    _cache[c]=res;_cacheTime[c]=now;
+    return res;
+  }
+  return getAll(c,...cons);
+}
+function clearCache(c){delete _cache[c];delete _cacheTime[c];}
+
 
 // ── UI HELPERS ──
 const MY=(m,y)=>MN[m-1]+' '+y;
@@ -300,13 +318,29 @@ function toast(msg,type='ok'){
 // ── AUTH ──
 onAuthStateChanged(auth,async user=>{
   if(user){
-    CU=user;UDATA=await getOne('users',user.uid);
-    if(!UDATA){await signOut(auth);showLogin();return;}
-    ROLE=UDATA.role;
-    const st=await getOne('settings','main');
-    if(st?.institute_name)INST=st.institute_name;
+    CU=user;
+    // Check sessionStorage cache first (avoids DB call on page refresh)
+    const cached=sessionStorage.getItem('udata_'+user.uid);
+    if(cached){
+      UDATA=JSON.parse(cached);ROLE=UDATA.role;
+    }else{
+      UDATA=await getOne('users',user.uid);
+      if(!UDATA){await signOut(auth);showLogin();return;}
+      ROLE=UDATA.role;
+      sessionStorage.setItem('udata_'+user.uid,JSON.stringify(UDATA));
+    }
+    // Cache settings too
+    const cachedInst=sessionStorage.getItem('inst');
+    if(cachedInst){INST=cachedInst;}
+    else{
+      const st=await getOne('settings','main');
+      if(st?.institute_name){INST=st.institute_name;sessionStorage.setItem('inst',INST);}
+    }
     showApp();
-  }else{showLogin();}
+  }else{
+    sessionStorage.clear();
+    showLogin();
+  }
 });
 
 function showLogin(){
@@ -380,7 +414,7 @@ window.closeModal=()=>{document.getElementById('modalWrap').style.display='none'
 //  DASHBOARD
 // ══════════════════════════════════════════════
 async function pgDash(){
-  const [students,teachers,fees]=await Promise.all([getAll('students'),getAll('teachers'),getAll('fees')]);
+  const [students,teachers,fees]=await Promise.all([getAllCached('students'),getAllCached('teachers'),isDir()?getAllCached('fees'):Promise.resolve([])]);
   const now=new Date(),cm=now.getMonth()+1,cy=now.getFullYear();
   const hostel=students.filter(s=>s.type==='hostel').length;
 
@@ -580,17 +614,25 @@ function parseCSV(text){
 
 function parseExcel(file){
   return new Promise((resolve,reject)=>{
-    const reader=new FileReader();
-    reader.onload=e=>{
-      try{
-        const wb=XLSX.read(e.target.result,{type:'array'});
-        const ws=wb.Sheets[wb.SheetNames[0]];
-        const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
-        resolve(data);
-      }catch(err){reject(err);}
-    };
-    reader.onerror=reject;
-    reader.readAsArrayBuffer(file);
+    // Lazy load SheetJS only when needed
+    function doRead(){
+      const reader=new FileReader();
+      reader.onload=e=>{
+        try{
+          const wb=XLSX.read(e.target.result,{type:'array'});
+          const ws=wb.Sheets[wb.SheetNames[0]];
+          const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+          resolve(data);
+        }catch(err){reject(err);}
+      };
+      reader.onerror=reject;
+      reader.readAsArrayBuffer(file);
+    }
+    if(window.XLSX){doRead();return;}
+    const s=document.createElement('script');
+    s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    s.onload=doRead;s.onerror=()=>reject(new Error('XLSX library load failed'));
+    document.head.appendChild(s);
   });
 }
 
@@ -807,7 +849,7 @@ async function doImport(students){
 //  STUDENTS
 // ══════════════════════════════════════════════
 async function pgStudents(){
-  const sts=await getAll('students');
+  const sts=await getAllCached('students');
   window.__sts=sts;
   return`
   <div style="display:flex;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px" class="no-print">
@@ -940,7 +982,7 @@ window.saveStu=async function(eid){
       city:document.getElementById('scit').value.trim(),
       startMonth:Number(smm),startYear:Number(smy),
       type:document.getElementById('styp').value,...(photo?{photo}:{})});
-    closeModal();toast('✅ Student saved!');go('students');
+    clearCache('students');closeModal();toast('✅ Student saved!');go('students');
   }catch(e){er.style.display='block';er.textContent='❌ '+e.message;btn.disabled=false;btn.textContent='💾 Save';}
 };
 window.delStu=async function(id){
@@ -949,7 +991,7 @@ window.delStu=async function(id){
     await del_('students',id);
     const fes=await getAll('fees',where('studentId','==',id));
     await Promise.all(fes.map(f=>del_('fees',f.id)));
-    toast('Deleted!','info');go('students');
+    clearCache('students');toast('Deleted!','info');go('students');
   }catch(e){toast('Error: '+e.message,'err');}
 };
 
@@ -1067,7 +1109,7 @@ window.saveFee=async function(eid,sid){
       payDate:document.getElementById('fdt').value,
       payMode:document.getElementById('fpm').value,
       remarks:document.getElementById('fr').value.trim()});
-    closeModal();toast('✅ Payment saved!');go('studentDetail',{id:sid});
+    clearCache('fees');closeModal();toast('✅ Payment saved!');go('studentDetail',{id:sid});
   }catch(e){er.style.display='block';er.textContent='❌ '+e.message;btn.disabled=false;btn.textContent='💾 Save';}
 };
 window.delFee=async function(fid,sid){
@@ -1620,6 +1662,7 @@ async function pgSettings(){
 window.saveInst=async function(){
   const n=document.getElementById('stName').value.trim();if(!n){alert('Name daalein');return;}
   await save_('settings','main',{institute_name:n});INST=n;
+  sessionStorage.setItem('inst',n);
   document.getElementById('sbName').textContent='🏫 '+n;
   document.getElementById('loginName').textContent=n;
   document.getElementById('instMsg').innerHTML='<span class="badge b-green">✅ Saved!</span>';
